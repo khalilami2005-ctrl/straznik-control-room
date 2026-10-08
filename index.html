@@ -1,0 +1,929 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Strażnik Control Room</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Public+Sans:wght@400;500;600;700&display=swap">
+<style>
+body{margin:0}
+[hidden]{display:none!important}
+/* Layout: municipal control room. Summary tiles first, then map + morning list, then the live feeds. */
+:root{
+  --bg:#EDF1F3; --panel:#FAFBFC; --panel-2:#E9EEF1; --line:#D3DCE1; --fg:#13202A; --muted:#536571;
+  --accent:#1F5FAD; --accent-soft:#DCE7F5; --on-accent:#FAFBFC;
+  --low:#2C7A52; --medium:#9A6410; --high:#C2551A; --critical:#C02F2F;
+  --land:#E1E8EB; --land-edge:#B6C4CB; --water:#94BFE6; --road:#FAFBFC; --road-major:#EDC97A; --map-label:#687A85;
+  --font-ui:'Public Sans','Segoe UI',Arial,sans-serif; --font-data:'IBM Plex Mono',ui-monospace,Menlo,Consolas,monospace;
+  --radius:6px;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0E151A; --panel:#141E25; --panel-2:#1C2830; --line:#26353F; --fg:#E2E9ED; --muted:#91A3AE;
+  --accent:#6FA3E9; --accent-soft:#1B2E47; --on-accent:#0E151A;
+  --low:#4DBB82; --medium:#D9A03A; --high:#EE8A4C; --critical:#F06A6A;
+  --land:#18242C; --land-edge:#2E404B; --water:#25486C; --road:#2A3943; --road-major:#6B5A2E; --map-label:#7F929D;
+  color-scheme:dark;
+}}
+:root[data-theme="dark"]{
+  --bg:#0E151A; --panel:#141E25; --panel-2:#1C2830; --line:#26353F; --fg:#E2E9ED; --muted:#91A3AE;
+  --accent:#6FA3E9; --accent-soft:#1B2E47; --on-accent:#0E151A;
+  --low:#4DBB82; --medium:#D9A03A; --high:#EE8A4C; --critical:#F06A6A;
+  --land:#18242C; --land-edge:#2E404B; --water:#25486C; --road:#2A3943; --road-major:#6B5A2E; --map-label:#7F929D;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font:14px/1.45 var(--font-ui);padding-inline:16px;padding-block:0 32px}
+.wrap{max-width:1440px;margin-inline:auto;display:flex;flex-direction:column;gap:16px}
+.mono{font-family:var(--font-data);font-variant-numeric:tabular-nums}
+button{font:inherit;color:inherit;cursor:pointer}
+button:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+/* Top bar */
+.top{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:var(--bg);display:flex;flex-wrap:wrap;align-items:center;gap:12px 20px;padding-block:14px;border-bottom:1px solid var(--line)}
+.brand{display:flex;align-items:center;gap:12px;min-width:0}
+.mark{width:34px;height:34px;border-radius:5px;background:var(--accent);color:var(--on-accent);display:grid;place-items:center;font-weight:700;font-size:18px}
+.brand h1{font-size:19px;font-weight:700;margin:0;letter-spacing:.01em}
+.brand p{margin:0;color:var(--muted);font-size:12.5px}
+.top-right{margin-left:auto;display:flex;flex-wrap:wrap;align-items:center;gap:10px}
+.live{display:flex;align-items:center;gap:8px;font:500 12px var(--font-data);color:var(--muted)}
+.live i{width:8px;height:8px;border-radius:50%;background:var(--low);box-shadow:0 0 0 0 var(--low);animation:beat 2s infinite}
+.live.paused i{background:var(--muted);animation:none}
+@keyframes beat{0%{box-shadow:0 0 0 0 color-mix(in srgb,var(--low) 60%,transparent)}80%,100%{box-shadow:0 0 0 7px transparent}}
+.tag{font:600 11px var(--font-data);letter-spacing:.06em;text-transform:uppercase;color:var(--medium);border:1px dashed color-mix(in srgb,var(--medium) 60%,transparent);padding:4px 7px;border-radius:3px}
+.btn{border:1px solid var(--line);background:var(--panel);padding:7px 12px;border-radius:5px;font-weight:600;font-size:13px}
+.btn:hover{border-color:var(--accent)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+.btn[disabled]{opacity:.55;cursor:default}
+
+/* Scenario banner */
+.scenario{border:1px solid var(--accent);background:var(--accent-soft);border-radius:var(--radius);padding:12px 16px;display:flex;flex-direction:column;gap:10px}
+.scenario-head{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;justify-content:space-between}
+.scenario-head strong{font-size:14px}
+.steps{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:6px}
+.step{display:flex;flex-direction:column;gap:5px;font-size:12px;color:var(--muted)}
+.step b{height:4px;border-radius:2px;background:var(--line)}
+.step.on{color:var(--fg);font-weight:600}
+.step.on b{background:var(--accent)}
+.scenario-msg{font-size:13.5px}
+
+/* KPI tiles */
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px}
+.kpi{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:14px 16px;display:flex;flex-direction:column;gap:8px;min-width:0}
+.kpi .lab{font-size:11.5px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--muted)}
+.kpi .val{font:600 28px/1.1 var(--font-data);font-variant-numeric:tabular-nums}
+.kpi .sub{font-size:12.5px;color:var(--muted)}
+.bar{height:6px;border-radius:3px;background:var(--panel-2);overflow:hidden}
+.bar>span{display:block;height:100%;background:var(--c,var(--accent));border-radius:3px;transition:width .6s ease}
+.chips{display:flex;gap:6px;flex-wrap:wrap}
+
+.lvl{--c:var(--muted);display:inline-flex;align-items:center;gap:5px;font:600 11px/1 var(--font-data);letter-spacing:.03em;padding:4px 7px;border-radius:3px;color:var(--c);background:color-mix(in srgb,var(--c) 13%,transparent);border:1px solid color-mix(in srgb,var(--c) 35%,transparent);white-space:nowrap}
+.lvl.low{--c:var(--low)} .lvl.medium{--c:var(--medium)} .lvl.high{--c:var(--high)} .lvl.critical{--c:var(--critical)}
+.c-low{--c:var(--low)} .c-medium{--c:var(--medium)} .c-high{--c:var(--high)} .c-critical{--c:var(--critical)}
+
+/* Panels */
+.grid-main{display:grid;grid-template-columns:minmax(0,1.65fr) minmax(0,1fr);gap:16px;align-items:start}
+.grid-3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;align-items:start}
+.grid-2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px;align-items:start}
+.col{display:flex;flex-direction:column;gap:16px;min-width:0}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);min-width:0}
+.ph{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:6px 12px;padding:12px 16px;border-bottom:1px solid var(--line)}
+.ph h2{margin:0;font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase}
+.ph span{font-size:12px;color:var(--muted)}
+.pb{padding:12px 16px}
+
+/* Map */
+.qs{display:flex;flex-wrap:wrap;gap:6px;padding:10px 16px 0}
+.q{border:1px solid var(--line);background:var(--panel);border-radius:999px;padding:5px 11px;font-size:12.5px}
+.q[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+.qcount{font-size:12.5px;color:var(--muted);padding:6px 16px 0;min-height:24px}
+.map-wrap{position:relative;padding:8px 12px 4px}
+.map{display:block;width:100%;height:auto}
+.map .land{fill:var(--land);stroke:var(--land-edge);stroke-width:1.5}
+.map .water{fill:none;stroke:var(--water);stroke-linecap:round}
+.map .lake{fill:var(--water)}
+.map .road{fill:none;stroke:var(--road);stroke-width:4;stroke-linecap:round}
+.map .road-major{fill:none;stroke:var(--road-major);stroke-width:7;stroke-linecap:round}
+.map .dist{fill:var(--map-label);font:600 11px var(--font-ui);letter-spacing:.12em;text-transform:uppercase}
+.map .roadlab{fill:var(--map-label);font:600 11px var(--font-data)}
+.mk{cursor:pointer;outline:none}
+.mk .dot{fill:var(--c);stroke:var(--panel);stroke-width:2.5;transition:fill .5s}
+.mk .ring{fill:none;stroke:var(--c);stroke-width:2;opacity:0;transform-box:fill-box;transform-origin:center}
+.mk .sel{fill:none;stroke:var(--fg);stroke-width:2;stroke-dasharray:4 3;opacity:0}
+.mk.selected .sel{opacity:1}
+.mk:focus-visible .sel{opacity:1;stroke:var(--accent)}
+.mk.critical .ring{animation:alarm 1.6s ease-out infinite}
+.mk.ping .ring{animation:ping .9s ease-out}
+.mk.dim{opacity:.18}
+@keyframes alarm{0%{opacity:.9;transform:scale(1)}100%{opacity:0;transform:scale(2.6)}}
+@keyframes ping{0%{opacity:1;transform:scale(1);stroke:var(--accent)}100%{opacity:0;transform:scale(3.2);stroke:var(--accent)}}
+.legend{display:flex;flex-wrap:wrap;gap:6px 16px;padding:4px 16px 14px;font-size:12px;color:var(--muted)}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--c);margin-right:6px;vertical-align:-1px}
+.tip{position:absolute;pointer-events:none;background:var(--fg);color:var(--bg);padding:7px 10px;border-radius:5px;font-size:12.5px;max-width:240px;transform:translate(-50%,calc(-100% - 14px))}
+.tip b{display:block;font-weight:600}
+
+/* Asset card */
+.asset h3{margin:4px 0 2px;font-size:19px;line-height:1.25;text-wrap:balance}
+.asset .meta{margin:0;color:var(--muted);font-size:13px}
+.asset-top{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.state{margin-top:10px;padding:8px 10px;border-radius:5px;font-size:13px;font-weight:600;color:var(--c);background:color-mix(in srgb,var(--c) 12%,transparent)}
+.facts{display:grid;grid-template-columns:auto minmax(0,1fr);gap:7px 14px;margin:14px 0 0;font-size:13px}
+.facts dt{color:var(--muted)}
+.facts dd{margin:0;font-weight:500;min-width:0}
+.copies{display:inline-flex;gap:4px;vertical-align:-1px;margin-right:6px}
+.copies i{width:11px;height:11px;border-radius:50%;border:2px solid var(--accent)}
+.copies i.on{background:var(--accent)}
+.scorebox{display:grid;grid-template-columns:auto minmax(0,1fr);gap:14px;align-items:center;margin-top:14px;padding-top:14px;border-top:1px solid var(--line)}
+.bignum{font:600 40px/1 var(--font-data);color:var(--c)}
+.parts{display:grid;gap:6px;font-size:12px;color:var(--muted)}
+.part{display:grid;grid-template-columns:96px minmax(0,1fr) 30px;gap:8px;align-items:center}
+.part .mono{text-align:right;color:var(--fg)}
+.actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
+.actions .btn{flex:1 1 140px}
+.human{margin:8px 0 0;font-size:12px;color:var(--muted)}
+
+/* Morning list */
+.ml{list-style:none;margin:0;padding:0}
+.ml li{display:grid;grid-template-columns:22px minmax(0,1fr) 92px;gap:10px;align-items:center;padding:9px 16px;border-top:1px solid var(--line);cursor:pointer}
+.ml li:first-child{border-top:0}
+.ml li:hover,.ml li.cur{background:var(--panel-2)}
+.ml .rk{font:600 13px var(--font-data);color:var(--muted)}
+.ml .nm{font-weight:600;font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ml .hd{font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ml .sc{display:flex;flex-direction:column;gap:4px;align-items:flex-end}
+.ml .sc .bar{width:100%}
+.ml li.moved{animation:flash 1.2s ease-out}
+@keyframes flash{from{background:color-mix(in srgb,var(--accent) 22%,transparent)}to{background:transparent}}
+
+/* Feeds */
+.feed{list-style:none;margin:0;padding:6px 0;font:12px/1.5 var(--font-data);height:318px;overflow:hidden}
+.feed li{display:grid;grid-template-columns:62px 56px minmax(0,1fr) auto;gap:8px;align-items:center;padding:4px 16px}
+.feed li.new{animation:flash 1.2s ease-out}
+.feed .t{color:var(--muted)}
+.feed .d{color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.res{font-weight:600;font-size:11px;padding:2px 6px;border-radius:3px;color:var(--c);background:color-mix(in srgb,var(--c) 13%,transparent)}
+.rows{display:grid;gap:12px}
+.row{display:grid;gap:5px}
+.row-top{display:flex;justify-content:space-between;gap:8px;font-size:13px}
+.row-top span:last-child{color:var(--muted);font-family:var(--font-data);font-size:12px;white-space:nowrap}
+.row small{color:var(--muted);font-size:12px}
+.sub-h{margin:16px 0 8px;font-size:11.5px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--muted)}
+.sup{display:grid;grid-template-columns:minmax(0,1fr) 80px 36px;gap:10px;align-items:center;font-size:13px;padding:7px 0;border-top:1px solid var(--line)}
+.sup:first-child{border-top:0}
+.sup .nm{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sup .sig{display:block;font-size:11.5px;color:var(--high);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sup .h{font:600 13px var(--font-data);text-align:right;color:var(--c)}
+.spark{width:80px;height:24px;display:block}
+.spark polyline{fill:none;stroke:var(--c);stroke-width:1.6}
+.spark path{fill:color-mix(in srgb,var(--c) 14%,transparent);stroke:none}
+.log{list-style:none;margin:0;padding:0;font-size:13px;max-height:300px;overflow:auto}
+.log li{display:grid;grid-template-columns:62px minmax(0,1fr);gap:10px;padding:8px 16px;border-top:1px solid var(--line)}
+.log li:first-child{border-top:0}
+.log .t{font:12px var(--font-data);color:var(--muted);padding-top:1px}
+.log small{display:block;color:var(--muted);font-size:12px}
+.empty{color:var(--muted);font-size:13px;padding:12px 16px}
+
+/* Toasts */
+.toasts{position:fixed;right:16px;bottom:calc(16px + env(safe-area-inset-bottom,0px));display:flex;flex-direction:column;gap:8px;z-index:10;max-width:min(380px,calc(100vw - 32px))}
+.toast{background:var(--panel);border:1px solid var(--line);border-left:4px solid var(--c);border-radius:5px;padding:10px 14px;font-size:13px;box-shadow:0 6px 24px rgba(10,20,30,.18);animation:slide .3s ease-out}
+.toast b{display:block;font-size:11px;letter-spacing:.07em;text-transform:uppercase;color:var(--c);margin-bottom:2px}
+@keyframes slide{from{transform:translateY(10px);opacity:0}to{transform:none;opacity:1}}
+.foot{color:var(--muted);font-size:12px;text-align:center;padding-top:4px}
+
+@media (max-width:1100px){.grid-3{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}.grid-3>:last-child{grid-column:1/-1}}
+@media (max-width:900px){.grid-main,.grid-2,.grid-3{grid-template-columns:minmax(0,1fr)}.grid-3>:last-child{grid-column:auto}.steps{grid-template-columns:repeat(5,minmax(0,1fr))}.step span{display:none}.step.on span{display:block}}
+@media (max-width:520px){.kpi .val{font-size:24px}.feed li{grid-template-columns:62px minmax(0,1fr) auto;padding-inline:12px}.feed li .d{display:none}.top-right{margin-left:0}}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div class="brand">
+      <div class="mark" aria-hidden="true">S</div>
+      <div><h1>Strażnik</h1><p>Rzeszów · city asset control room</p></div>
+    </div>
+    <div class="top-right">
+      <span class="tag">Prototype · mock data</span>
+      <span class="live" id="live"><i></i><span id="clock">--:--:--</span></span>
+      <button class="btn" id="pauseBtn" type="button">Pause live</button>
+      <button class="btn primary" id="demoBtn" type="button">Run demo: supplier failure</button>
+    </div>
+  </header>
+
+  <section class="scenario" id="scenario" hidden aria-live="polite">
+    <div class="scenario-head">
+      <strong>Demo: the traffic-light supplier fails</strong>
+      <button class="btn" id="resetBtn" type="button">Reset demo</button>
+    </div>
+    <div class="steps" id="steps"></div>
+    <div class="scenario-msg" id="scenarioMsg"></div>
+  </section>
+
+  <section class="kpis" aria-label="Summary">
+    <div class="kpi"><span class="lab">Assets tracked</span><span class="val" id="kTotal">4,812</span><span class="sub" id="kTotalSub">24 shown on the map</span></div>
+    <div class="kpi"><span class="lab">Under city control</span><span class="val" id="kHeld">–</span><div class="bar"><span id="kHeldBar" style="width:0"></span></div><span class="sub" id="kHeldSub">–</span></div>
+    <div class="kpi"><span class="lab">Zero city copies</span><span class="val" id="kZero">–</span><span class="sub">Each one is a red alert</span></div>
+    <div class="kpi"><span class="lab">Proofs today</span><span class="val" id="kProofs">–</span><div class="bar"><span id="kProofBar" class="c-low" style="width:0;--c:var(--low)"></span></div><span class="sub" id="kProofSub">–</span></div>
+    <div class="kpi"><span class="lab">Morning list</span><span class="val" id="kAlerts">–</span><div class="chips" id="kAlertChips"></div></div>
+    <div class="kpi"><span class="lab">Know-how recorded</span><span class="val" id="kKnow">–</span><div class="bar"><span id="kKnowBar" style="width:0"></span></div><span class="sub" id="kKnowSub">–</span></div>
+  </section>
+
+  <div class="grid-main">
+    <section class="panel" aria-label="City map">
+      <div class="ph"><h2>City map</h2><span>Schematic · districts placed approximately</span></div>
+      <div class="qs" role="group" aria-label="Ask Strażnik">
+        <button class="q" type="button" data-q="all" aria-pressed="true">All assets</button>
+        <button class="q" type="button" data-q="zero" aria-pressed="false">What has zero city copies?</button>
+        <button class="q" type="button" data-q="one" aria-pressed="false">What does only one person know?</button>
+        <button class="q" type="button" data-q="contract" aria-pressed="false">Which contracts end in 120 days?</button>
+        <button class="q" type="button" data-q="supplier" aria-pressed="false">Which suppliers are in trouble?</button>
+      </div>
+      <div class="qcount" id="qcount" aria-live="polite"></div>
+      <div class="map-wrap" id="mapWrap">
+        <svg class="map" id="map" viewBox="0 0 1000 660" role="img" aria-label="Schematic map of Rzeszów with city assets">
+          <path class="land" d="M120 170 C150 120 230 92 330 78 C430 64 520 92 620 70 C720 50 820 80 900 160 C950 215 945 300 915 390 C890 470 860 545 770 595 C680 640 560 640 450 632 C350 625 260 590 190 530 C130 478 98 400 96 320 C94 250 100 205 120 170 Z"/>
+          <path class="road-major" d="M0 118 C200 110 420 98 620 92 C780 88 900 84 1000 80"/>
+          <path class="road-major" d="M196 0 C210 160 228 330 238 480 C244 560 248 610 252 660"/>
+          <text class="roadlab" x="930" y="70">A4</text>
+          <text class="roadlab" x="168" y="30">S19</text>
+          <path class="road" d="M520 330 L430 240 L330 200"/>
+          <path class="road" d="M520 330 L640 230 L780 170"/>
+          <path class="road" d="M520 330 L700 400 L860 460"/>
+          <path class="road" d="M520 330 L540 470 L560 610"/>
+          <path class="road" d="M520 330 L400 420 L270 470"/>
+          <path class="road" d="M520 330 L520 200 L520 95"/>
+          <path class="road" d="M520 330 L720 320 L910 320"/>
+          <path class="water" stroke-width="11" d="M290 660 C335 600 395 545 425 485 C448 440 468 400 500 360 C540 312 598 286 660 260 C740 226 840 192 1000 150"/>
+          <path class="water" stroke-width="4" d="M960 430 C880 410 800 395 725 355 C682 332 645 305 612 286"/>
+          <ellipse class="lake" cx="452" cy="452" rx="46" ry="17" transform="rotate(-40 452 452)"/>
+          <text class="dist" x="470" y="372">Śródmieście</text>
+          <text class="dist" x="590" y="212">Staromieście</text>
+          <text class="dist" x="680" y="292">Pobitno</text>
+          <text class="dist" x="800" y="268">Słocina</text>
+          <text class="dist" x="672" y="132">Załęże</text>
+          <text class="dist" x="660" y="460">Zalesie</text>
+          <text class="dist" x="490" y="600">Budziwój</text>
+          <text class="dist" x="300" y="300">Drabinianka</text>
+          <text class="dist" x="370" y="538">Baranówka</text>
+          <text class="dist" x="268" y="622">Zwięczyca</text>
+          <text class="dist" x="290" y="172">Wilkowyja</text>
+          <text class="dist" x="400" y="210">Nowe Miasto</text>
+          <text class="dist" x="140" y="410">Przybyszówka</text>
+          <text class="dist" x="620" y="612">Biała</text>
+          <g id="markers"></g>
+        </svg>
+        <div class="tip" id="tip" hidden></div>
+      </div>
+      <div class="legend">
+        <span class="c-critical"><i></i>Critical</span>
+        <span class="c-high"><i></i>High</span>
+        <span class="c-medium"><i></i>Medium</span>
+        <span class="c-low"><i></i>Low</span>
+        <span>Blue ripple = proof check running</span>
+      </div>
+    </section>
+
+    <div class="col">
+      <section class="panel asset" aria-label="Selected asset">
+        <div class="ph"><h2>Asset identity card</h2><span>Click a point or a row</span></div>
+        <div class="pb" id="assetCard"></div>
+      </section>
+      <section class="panel" aria-label="Morning list">
+        <div class="ph"><h2>The numbers · morning list</h2><span id="mlTime">Updated –</span></div>
+        <ol class="ml" id="ml"></ol>
+      </section>
+    </div>
+  </div>
+
+  <div class="grid-3">
+    <section class="panel" aria-label="Proof of possession feed">
+      <div class="ph"><h2>Proof of possession · live</h2><span>Challenge → answer</span></div>
+      <ul class="feed" id="feed"></ul>
+    </section>
+    <section class="panel" aria-label="Sovereign vault">
+      <div class="ph"><h2>Sovereign vault</h2><span>Copies the city controls</span></div>
+      <div class="pb">
+        <div class="rows" id="vaultCats"></div>
+        <p class="sub-h">Copies in progress</p>
+        <div class="rows" id="jobs"></div>
+      </div>
+    </section>
+    <section class="panel" aria-label="Supplier health">
+      <div class="ph"><h2>Supplier health</h2><span>Lowest first · last 40 checks</span></div>
+      <div class="pb" id="suppliers"></div>
+    </section>
+  </div>
+
+  <div class="grid-2">
+    <section class="panel" aria-label="Knowledge capture">
+      <div class="ph"><h2>Knowledge capture</h2><span>AI interviews before people leave</span></div>
+      <div class="pb"><div class="rows" id="know"></div></div>
+    </section>
+    <section class="panel" aria-label="Action log">
+      <div class="ph"><h2>Action log</h2><span>Strażnik proposes · a person approves</span></div>
+      <ul class="log" id="log"></ul>
+    </section>
+  </div>
+  <p class="foot">Prototype with invented data. Supplier names are fictional. Strażnik tracks the city's assets, never citizens.</p>
+</div>
+<div class="toasts" id="toasts" aria-live="polite"></div>
+
+<script>
+(() => {
+  const $ = (s) => document.querySelector(s);
+  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+  const rnd = (a, b) => a + Math.random() * (b - a);
+  const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
+  const nf = (n) => Math.round(n).toLocaleString('en-US');
+  const now = () => new Date().toTimeString().slice(0, 8);
+  const hex = (n) => Math.floor(Math.random() * 16 ** n).toString(16).padStart(n, '0');
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+  const TYPE = { software: 'Software', data: 'Data', rights: 'Rights & keys', knowledge: 'Know-how', archive: 'Archives' };
+  const LEVEL_LABEL = { low: 'Low', medium: 'Medium', high: 'High', critical: 'Critical' };
+
+  // ---- Mock data -------------------------------------------------------
+  const SUPPLIERS_INIT = [
+    ['viatrix', 'Viatrix Systems', 74, ['Late payment (12 days)']],
+    ['transit', 'Transit Logic', 81, []],
+    ['payride', 'PayRide', 77, []],
+    ['visionpark', 'VisionPark', 69, ['Lead engineer left']],
+    ['kartogeo', 'KartoGeo', 88, []],
+    ['bridgelab', 'BridgeLab', 46, ['Lost 2 big clients']],
+    ['lumengrid', 'LumenGrid', 63, []],
+    ['airsense', 'AirSense', 72, []],
+    ['ecoroute', 'EcoRoute', 54, ['Office for sale']],
+    ['archcloud', 'ArchiwumCloud', 84, []],
+    ['netreg', 'NetReg PL', 90, []],
+    ['planstudio', 'PlanStudio', 52, ['Late tax filing']],
+    ['edusoft', 'EduSoft', 79, []],
+    ['sirentech', 'SirenTech', 66, []],
+    ['greenmap', 'GreenMap', 83, []],
+    ['bookit', 'BookIt', 70, []],
+    ['hydrolab', 'HydroLab', 61, []],
+    ['city', 'City IT department', 95, [], true],
+  ];
+  // id, name, type, holder, x, y, district, cityCopies, knowers, contractDays, formatRisk, value
+  const ASSETS_INIT = [
+    ['A-0412', 'Traffic light control code', 'software', 'viatrix', 600, 248, 'Staromieście', 0, 1, 300, 0.3, 3],
+    ['A-0107', 'Public transport management', 'software', 'transit', 692, 352, 'Pobitno', 1, 2, 410, 0.2, 3],
+    ['A-0233', 'E-TICKET payment records', 'data', 'payride', 548, 318, 'Śródmieście', 1, 3, 150, 0.1, 3],
+    ['A-0318', 'Smart parking camera models', 'software', 'visionpark', 492, 302, 'Śródmieście', 0, 2, 95, 0.4, 2],
+    ['A-0520', 'City GIS base map', 'data', 'kartogeo', 452, 270, 'Nowe Miasto', 2, 3, 520, 0.1, 3],
+    ['A-0611', 'Zamkowy Bridge BIM model', 'data', 'bridgelab', 578, 372, 'Śródmieście', 0, 1, 60, 0.5, 2],
+    ['A-0702', 'Water network schematics', 'knowledge', 'city', 702, 498, 'Zalesie', 1, 1, null, 0.5, 3],
+    ['A-0715', 'Pump station know-how', 'knowledge', 'city', 330, 588, 'Zwięczyca', 0, 1, null, 0.8, 3],
+    ['A-0803', 'City domain names', 'rights', 'netreg', 470, 340, 'Śródmieście', 1, 2, 200, 0, 3],
+    ['A-0811', 'E-services encryption keys', 'rights', 'city', 562, 288, 'Śródmieście', 1, 1, null, 0.1, 3],
+    ['A-0904', 'City archive scans 1945–1990', 'archive', 'archcloud', 508, 356, 'Śródmieście', 1, 2, 700, 0.3, 2],
+    ['A-0930', 'Local plan source files', 'data', 'planstudio', 420, 232, 'Nowe Miasto', 0, 2, 140, 0.6, 2],
+    ['A-1002', 'Energy invoice database (ROBOT)', 'data', 'city', 540, 352, 'Śródmieście', 2, 3, null, 0.1, 1],
+    ['A-1120', 'Street lighting control', 'software', 'lumengrid', 340, 322, 'Drabinianka', 0, 2, 230, 0.3, 2],
+    ['A-1210', 'Air quality sensor data', 'data', 'airsense', 842, 300, 'Słocina', 1, 2, 180, 0.2, 1],
+    ['A-1305', 'School e-register licences', 'rights', 'edusoft', 405, 510, 'Baranówka', 1, 2, 75, 0.1, 2],
+    ['A-1401', 'Snow-clearing route plans', 'knowledge', 'city', 722, 158, 'Załęże', 0, 1, null, 0.8, 1],
+    ['A-1502', 'Waste collection routing', 'software', 'ecoroute', 212, 440, 'Przybyszówka', 0, 2, 210, 0.3, 2],
+    ['A-1620', 'Building permit archive', 'archive', 'city', 466, 318, 'Śródmieście', 2, 3, null, 0.4, 2],
+    ['A-1733', 'Emergency siren network setup', 'software', 'sirentech', 528, 562, 'Budziwój', 0, 1, 330, 0.3, 3],
+    ['A-1810', 'Tree inventory', 'data', 'greenmap', 652, 578, 'Biała', 1, 2, 260, 0.1, 1],
+    ['A-1902', 'Sports hall booking system', 'software', 'bookit', 332, 214, 'Wilkowyja', 1, 2, 45, 0.2, 1],
+    ['A-2004', 'Cemetery records', 'archive', 'city', 742, 318, 'Pobitno', 1, 2, null, 0.5, 1],
+    ['A-2110', 'Wisłok flood model', 'data', 'hydrolab', 384, 470, 'Baranówka', 0, 2, 400, 0.4, 3],
+  ];
+  const VAULT_INIT = { software: [870, 1103], data: [1501, 1622], rights: [512, 611], knowledge: [401, 570], archive: [880, 906] };
+  const KNOW_INIT = [
+    ['k1', 'Pump station engineer', 'A-0715', 'Retires in 7 months', 6, 10, 0.05],
+    ['k2', 'Traffic systems technician', 'A-0412', 'Contract ends in 5 months', 2, 8, 0.03],
+    ['k3', 'E-services administrator', 'A-0811', 'Only person with access', 3, 5, 0.04],
+    ['k4', 'Snow-clearing dispatcher', 'A-1401', 'Retires in 11 months', 1, 6, 0.03],
+    ['k5', 'Water network planner', 'A-0702', 'Moves to Kraków in 3 months', 7, 8, 0.02],
+  ];
+  const JOBS_INIT = [
+    ['A-0520', 'third copy', 3.2, 38, 3],
+    ['A-0904', 'second copy', 41.0, 71, 2],
+    ['A-1210', 'second copy', 0.8, 12, 4],
+  ];
+
+  let S, A, ASSETS, SUPPLIERS, VAULT, KNOW, JOBS, LOG, FEED, proofs, selected, query, scen, tickN;
+  function init() {
+    SUPPLIERS = SUPPLIERS_INIT.map(([id, name, health, signals, internal]) => ({
+      id, name, health, base: health, signals: [...signals], internal: !!internal, closed: false, lock: false,
+      hist: Array.from({ length: 40 }, () => clamp(health + rnd(-3, 3), 0, 100)),
+    }));
+    S = Object.fromEntries(SUPPLIERS.map((s) => [s.id, s]));
+    ASSETS = ASSETS_INIT.map(([id, name, type, holder, x, y, district, cityCopies, knowers, contract, format, value]) => ({
+      id, name, type, holder, x, y, district, cityCopies, knowers, contract, format, value,
+      heldAtStart: cityCopies > 0, lastProof: null, proof: 'pending', request: null, prevRank: null,
+    }));
+    A = Object.fromEntries(ASSETS.map((a) => [a.id, a]));
+    VAULT = Object.fromEntries(Object.entries(VAULT_INIT).map(([k, [held, total]]) => [k, { held, total }]));
+    KNOW = KNOW_INIT.map(([id, role, asset, leaves, done, total, speed]) => ({ id, role, asset, leaves, done, total, speed, finished: false }));
+    JOBS = JOBS_INIT.map(([asset, label, size, pct, speed]) => ({ asset, label, size, pct, speed }));
+    LOG = [
+      { t: '08:00:00', text: 'Morning list published: 24 assets checked overnight.', who: 'Strażnik' },
+      { t: '08:12:40', text: 'Second copy of A-0904 City archive scans scheduled.', who: 'Approved by duty officer' },
+    ];
+    FEED = [];
+    proofs = { passed: 11842, failed: 7 };
+    selected = 'A-0412';
+    query = 'all';
+    scen = null;
+    tickN = 0;
+  }
+
+  // ---- Risk model -------------------------------------------------------
+  function risk(a) {
+    const s = S[a.holder];
+    const sup = s.closed ? 1 : 1 - s.health / 100;
+    const con = a.contract == null ? 0.1 : clamp(1 - a.contract / 365, 0, 1);
+    const know = a.knowers <= 1 ? 1 : a.knowers === 2 ? 0.4 : 0.1;
+    const form = a.format;
+    const p = 0.45 * sup + 0.25 * con + 0.15 * know + 0.15 * form;
+    const cf = a.cityCopies === 0 ? 1 : a.cityCopies === 1 ? 0.35 : 0.15;
+    const score = Math.round(clamp(p * cf * (0.7 + 0.15 * a.value) * 160, 1, 99));
+    return { sup, con, know, form, score };
+  }
+  const level = (sc) => (sc >= 70 ? 'critical' : sc >= 45 ? 'high' : sc >= 25 ? 'medium' : 'low');
+  const healthLevel = (h, closed) => (closed ? 'critical' : h < 35 ? 'critical' : h < 55 ? 'high' : h < 70 ? 'medium' : 'low');
+
+  function matches(a, q) {
+    const s = S[a.holder];
+    if (q === 'zero') return a.cityCopies === 0;
+    if (q === 'one') return a.knowers <= 1;
+    if (q === 'contract') return a.contract != null && a.contract <= 120;
+    if (q === 'supplier') return !s.internal && (s.closed || s.health < 55);
+    return true;
+  }
+
+  // ---- Map -------------------------------------------------------------
+  const NS = 'http://www.w3.org/2000/svg';
+  const markers = {};
+  function buildMap() {
+    const g = $('#markers');
+    g.innerHTML = '';
+    ASSETS.forEach((a) => {
+      const m = document.createElementNS(NS, 'g');
+      m.setAttribute('class', 'mk');
+      m.setAttribute('transform', `translate(${a.x} ${a.y})`);
+      m.setAttribute('tabindex', '0');
+      m.setAttribute('role', 'button');
+      m.innerHTML = '<circle class="ring" r="9"></circle><circle class="sel" r="16"></circle><circle class="dot" r="8.5"></circle>';
+      m.addEventListener('click', () => select(a.id));
+      m.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); select(a.id); } });
+      m.addEventListener('mouseenter', () => showTip(a));
+      m.addEventListener('focus', () => showTip(a));
+      m.addEventListener('mouseleave', hideTip);
+      m.addEventListener('blur', hideTip);
+      g.appendChild(m);
+      markers[a.id] = m;
+    });
+  }
+  function showTip(a) {
+    const r = risk(a);
+    const wrap = $('#mapWrap'), svg = $('#map');
+    const box = svg.getBoundingClientRect(), wb = wrap.getBoundingClientRect();
+    const k = box.width / 1000;
+    const tip = $('#tip');
+    tip.innerHTML = `<b>${esc(a.name)}</b>${a.id} · ${LEVEL_LABEL[level(r.score)]} ${r.score} · ${a.cityCopies} city cop${a.cityCopies === 1 ? 'y' : 'ies'}`;
+    tip.style.left = `${box.left - wb.left + a.x * k}px`;
+    tip.style.top = `${box.top - wb.top + a.y * k}px`;
+    tip.hidden = false;
+  }
+  function hideTip() { $('#tip').hidden = true; }
+  function renderMap() {
+    let n = 0;
+    ASSETS.forEach((a) => {
+      const m = markers[a.id];
+      const lv = level(risk(a).score);
+      const hit = matches(a, query);
+      if (hit) n++;
+      m.classList.remove('low', 'medium', 'high', 'critical');
+      m.classList.add(lv);
+      m.classList.toggle('dim', !hit);
+      m.classList.toggle('selected', a.id === selected);
+      m.style.setProperty('--c', `var(--${lv})`);
+      m.setAttribute('aria-label', `${a.name}, ${LEVEL_LABEL[lv]} risk`);
+    });
+    const QTEXT = {
+      zero: 'assets have zero copies under city control.',
+      one: 'assets are known by only one person.',
+      contract: 'contracts end within 120 days.',
+      supplier: 'assets sit with a supplier in trouble.',
+    };
+    $('#qcount').textContent = query === 'all' ? 'Showing all 24 mapped assets.' : `Strażnik: ${n} ${QTEXT[query]}`;
+  }
+  function ping(id) {
+    const m = markers[id];
+    if (!m) return;
+    m.classList.remove('ping');
+    void m.getBoundingClientRect();
+    m.classList.add('ping');
+    setTimeout(() => m.classList.remove('ping'), 950);
+  }
+
+  // ---- Asset card ------------------------------------------------------
+  function select(id) {
+    selected = id;
+    buildCard();
+    renderMap();
+    renderList();
+  }
+  function buildCard() {
+    const a = A[selected];
+    $('#assetCard').innerHTML = `
+      <div class="asset-top"><span class="mono" style="color:var(--muted)">${a.id} · ${TYPE[a.type]}</span><span id="cLvl" class="lvl"></span></div>
+      <h3>${esc(a.name)}</h3>
+      <p class="meta">${esc(a.district)}</p>
+      <div class="state" id="cState"></div>
+      <dl class="facts">
+        <dt>Held by</dt><dd id="cHolder"></dd>
+        <dt>City copies</dt><dd id="cCopies"></dd>
+        <dt>People who know it</dt><dd id="cKnow"></dd>
+        <dt>Contract</dt><dd id="cContract"></dd>
+        <dt>Last proof</dt><dd id="cProof"></dd>
+      </dl>
+      <div class="scorebox">
+        <div><div class="bignum mono" id="cScore"></div><div style="font-size:12px;color:var(--muted);margin-top:4px">loss score</div></div>
+        <div class="parts" id="cParts"></div>
+      </div>
+      <div class="actions">
+        <button class="btn" type="button" id="aReq"></button>
+        <button class="btn" type="button" id="aCopy"></button>
+        <button class="btn" type="button" id="aInt"></button>
+      </div>
+      <p class="human">Strażnik proposes. A person approves every action.</p>`;
+    $('#aReq').addEventListener('click', () => requestDelivery(a));
+    $('#aCopy').addEventListener('click', () => startCopy(a, false));
+    $('#aInt').addEventListener('click', () => startInterview(a, false));
+    renderCard();
+  }
+  function renderCard() {
+    const a = A[selected];
+    const s = S[a.holder];
+    const r = risk(a);
+    const lv = level(r.score);
+    const lvEl = $('#cLvl');
+    lvEl.className = `lvl ${lv}`;
+    lvEl.textContent = `${LEVEL_LABEL[lv]} · ${r.score}`;
+    $('#cScore').textContent = r.score;
+    $('#cScore').style.setProperty('--c', `var(--${lv})`);
+
+    let state, sc;
+    if (s.closed && a.cityCopies > 0) { state = 'Supplier closed. The city holds its own copy: nothing lost.'; sc = 'low'; }
+    else if (s.closed) { state = 'Supplier closed and the city has no copy. Asset lost.'; sc = 'critical'; }
+    else if (a.cityCopies === 0) { state = 'Red alert: zero copies under city control.'; sc = 'critical'; }
+    else if (a.proof === 'fail') { state = 'Last proof failed. Checking again.'; sc = 'high'; }
+    else if (a.knowers <= 1) { state = 'Only one person knows how this works.'; sc = 'medium'; }
+    else { state = 'Under city control.'; sc = 'low'; }
+    const st = $('#cState');
+    st.textContent = state;
+    st.style.setProperty('--c', `var(--${sc})`);
+
+    const hl = healthLevel(s.health, s.closed);
+    $('#cHolder').innerHTML = s.internal ? 'City of Rzeszów (internal)' :
+      `${esc(s.name)} <span class="lvl ${hl}" style="margin-left:4px">${s.closed ? 'Closed' : `Health ${Math.round(s.health)}`}</span>`;
+    const dots = Array.from({ length: 3 }, (_, i) => `<i class="${i < a.cityCopies ? 'on' : ''}"></i>`).join('');
+    $('#cCopies').innerHTML = `<span class="copies" aria-hidden="true">${dots}</span>${a.cityCopies} of 3 target`;
+    $('#cKnow').textContent = a.knowers === 1 ? '1 person' : `${a.knowers} people`;
+    $('#cContract').textContent = a.contract == null ? 'Internal, no contract' : s.closed ? 'Ended (supplier closed)' : `Ends in ${a.contract} days`;
+    $('#cProof').innerHTML = a.lastProof ? `<span class="mono">${a.lastProof}</span> · ${a.proof === 'ok' ? 'passed' : a.proof === 'fail' ? 'failed' : 'city copy verified'}` : 'Waiting for next check';
+
+    const parts = [['Supplier risk', r.sup], ['Contract', r.con], ['Know-how', r.know], ['Format', r.form]];
+    $('#cParts').innerHTML = parts.map(([lab, v]) => {
+      const l = v >= 0.7 ? 'critical' : v >= 0.45 ? 'high' : v >= 0.25 ? 'medium' : 'low';
+      return `<div class="part"><span>${lab}</span><div class="bar"><span class="c-${l}" style="width:${Math.round(v * 100)}%"></span></div><span class="mono">${Math.round(v * 100)}</span></div>`;
+    }).join('');
+
+    const req = $('#aReq'), cp = $('#aCopy'), it = $('#aInt');
+    if (s.internal) { req.textContent = 'Held by the city'; req.disabled = true; }
+    else if (s.closed) { req.textContent = 'Supplier closed'; req.disabled = true; }
+    else if (a.request === 'pending') { req.textContent = 'Waiting for supplier…'; req.disabled = true; }
+    else if (a.request === 'done') { req.textContent = 'Delivered to the city'; req.disabled = true; }
+    else { req.textContent = 'Request delivery'; req.disabled = false; }
+    const job = JOBS.find((j) => j.asset === a.id);
+    if (job) { cp.textContent = `Copying… ${Math.round(job.pct)}%`; cp.disabled = true; }
+    else if (a.cityCopies >= 3) { cp.textContent = 'Copy target reached'; cp.disabled = true; }
+    else { cp.textContent = 'Make sovereign copy'; cp.disabled = false; }
+    const k = KNOW.find((x) => x.asset === a.id && !x.finished);
+    if (k) { it.textContent = `Interview ${Math.round((k.done / k.total) * 100)}%`; it.disabled = true; }
+    else if (a.knowers >= 3) { it.textContent = 'Know-how shared'; it.disabled = true; }
+    else { it.textContent = 'Schedule interview'; it.disabled = false; }
+  }
+
+  // ---- Morning list ----------------------------------------------------
+  function renderList() {
+    const ranked = ASSETS.map((a) => ({ a, r: risk(a) })).sort((x, y) => y.r.score - x.r.score).slice(0, 8);
+    $('#ml').innerHTML = ranked.map(({ a, r }, i) => {
+      const lv = level(r.score);
+      const s = S[a.holder];
+      const moved = a.prevRank != null && a.prevRank !== i && i < a.prevRank;
+      a.prevRank = i;
+      return `<li data-id="${a.id}" class="${a.id === selected ? 'cur' : ''} ${moved ? 'moved' : ''}" tabindex="0">
+        <span class="rk">${i + 1}</span>
+        <span style="min-width:0"><span class="nm" style="display:block">${esc(a.name)}</span><span class="hd" style="display:block"><span class="mono">${a.id}</span> · ${esc(s.internal ? 'City IT' : s.name)}${a.cityCopies === 0 ? ' · 0 copies' : ''}</span></span>
+        <span class="sc"><span class="lvl ${lv}">${LEVEL_LABEL[lv]} ${r.score}</span><span class="bar"><span class="c-${lv}" style="width:${r.score}%"></span></span></span>
+      </li>`;
+    }).join('');
+    ASSETS.forEach((a) => { if (!ranked.find((x) => x.a === a)) a.prevRank = null; });
+  }
+  $('#ml').addEventListener('click', (e) => { const li = e.target.closest('li'); if (li) select(li.dataset.id); });
+  $('#ml').addEventListener('keydown', (e) => { const li = e.target.closest('li'); if (li && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); select(li.dataset.id); } });
+
+  // ---- KPIs ------------------------------------------------------------
+  function heldNow(type) {
+    const v = VAULT[type];
+    const delta = ASSETS.filter((a) => a.type === type).reduce((d, a) => d + ((a.cityCopies > 0) - a.heldAtStart), 0);
+    return v.held + delta;
+  }
+  function renderKPIs() {
+    const total = Object.values(VAULT).reduce((t, v) => t + v.total, 0);
+    const held = Object.keys(VAULT).reduce((t, k) => t + heldNow(k), 0);
+    const pct = (held / total) * 100;
+    $('#kTotal').textContent = nf(total);
+    $('#kHeld').textContent = `${pct.toFixed(1)}%`;
+    $('#kHeldBar').style.width = `${pct}%`;
+    $('#kHeldSub').textContent = `${nf(held)} of ${nf(total)} assets`;
+    $('#kZero').textContent = nf(total - held);
+    const all = proofs.passed + proofs.failed;
+    $('#kProofs').textContent = nf(all);
+    $('#kProofBar').style.width = `${(proofs.passed / all) * 100}%`;
+    $('#kProofSub').textContent = `${nf(proofs.passed)} passed · ${proofs.failed} failed`;
+    const lv = ASSETS.map((a) => level(risk(a).score));
+    const c = lv.filter((l) => l === 'critical').length, h = lv.filter((l) => l === 'high').length, m = lv.filter((l) => l === 'medium').length;
+    $('#kAlerts').textContent = `${c + h} urgent`;
+    $('#kAlertChips').innerHTML = `<span class="lvl critical">${c} critical</span><span class="lvl high">${h} high</span><span class="lvl medium">${m} medium</span>`;
+    const kd = KNOW.reduce((t, k) => t + k.done, 0), kt = KNOW.reduce((t, k) => t + k.total, 0);
+    $('#kKnow').textContent = `${Math.round((kd / kt) * 100)}%`;
+    $('#kKnowBar').style.width = `${(kd / kt) * 100}%`;
+    $('#kKnowSub').textContent = `${kd.toFixed(1)} of ${kt} interview hours`;
+  }
+
+  // ---- Vault, suppliers, knowledge, feed, log ----------------------------
+  function renderVault() {
+    $('#vaultCats').innerHTML = Object.keys(VAULT).map((k) => {
+      const v = VAULT[k], h = heldNow(k), p = (h / v.total) * 100;
+      const l = p >= 90 ? 'low' : p >= 75 ? 'medium' : 'high';
+      return `<div class="row"><div class="row-top"><span>${TYPE[k]}</span><span>${nf(h)} / ${nf(v.total)} · ${p.toFixed(1)}%</span></div><div class="bar"><span class="c-${l}" style="width:${p}%"></span></div></div>`;
+    }).join('');
+    $('#jobs').innerHTML = JOBS.length ? JOBS.map((j) => {
+      const a = A[j.asset];
+      return `<div class="row"><div class="row-top"><span><span class="mono">${a.id}</span> ${esc(a.name)}</span><span>${Math.round(j.pct)}%</span></div><div class="bar"><span style="width:${j.pct}%"></span></div><small>${esc(j.label)} · ${j.size.toFixed(1)} GB · encrypted</small></div>`;
+    }).join('') : '<p class="empty" style="padding:0">No copy running.</p>';
+  }
+  function spark(hist, lv) {
+    const pts = hist.map((v, i) => `${(i / (hist.length - 1)) * 80},${24 - (v / 100) * 22 - 1}`);
+    return `<svg class="spark c-${lv}" viewBox="0 0 80 24" aria-hidden="true"><path d="M0,24 L${pts.join(' L')} L80,24 Z"></path><polyline points="${pts.join(' ')}"></polyline></svg>`;
+  }
+  function renderSuppliers() {
+    const list = SUPPLIERS.filter((s) => !s.internal).sort((a, b) => (a.closed ? -1 : b.closed ? 1 : a.health - b.health)).slice(0, 8);
+    $('#suppliers').innerHTML = list.map((s) => {
+      const lv = healthLevel(s.health, s.closed);
+      return `<div class="sup"><span style="min-width:0"><span class="nm" style="display:block">${esc(s.name)}</span>${s.signals.length ? `<span class="sig">${esc(s.closed ? 'Closed' : s.signals[s.signals.length - 1])}</span>` : ''}</span>${spark(s.hist, lv)}<span class="h c-${lv}">${s.closed ? '0' : Math.round(s.health)}</span></div>`;
+    }).join('');
+  }
+  function renderKnow() {
+    $('#know').innerHTML = KNOW.map((k) => {
+      const a = A[k.asset], p = (k.done / k.total) * 100;
+      return `<div class="row"><div class="row-top"><span>${esc(k.role)} · <span class="mono">${a.id}</span></span><span>${k.finished ? 'Done' : `${k.done.toFixed(1)} / ${k.total} h`}</span></div><div class="bar"><span class="${k.finished ? 'c-low' : ''}" style="width:${p}%"></span></div><small>${esc(k.leaves)} · ${esc(a.name)}</small></div>`;
+    }).join('');
+  }
+  function renderFeed() {
+    $('#feed').innerHTML = FEED.map((f, i) => {
+      const c = f.res === 'OK' ? 'low' : f.res === 'FAIL' ? 'critical' : 'medium';
+      return `<li class="${i === 0 ? 'new' : ''}"><span class="t">${f.t}</span><span>${f.id}</span><span class="d">${esc(f.who)} · block ${f.block} · nonce ${f.nonce} · ${f.ms} ms</span><span class="res" style="--c:var(--${c})">${f.res}</span></li>`;
+    }).join('');
+  }
+  function renderLog() {
+    $('#log').innerHTML = LOG.slice(0, 30).map((l) => `<li><span class="t">${l.t}</span><span>${esc(l.text)}<small>${esc(l.who)}</small></span></li>`).join('');
+  }
+  function log(text, who = 'Approved by duty officer') { LOG.unshift({ t: now(), text, who }); }
+  function toast(text, lv = 'medium', title) {
+    const el = document.createElement('div');
+    el.className = `toast c-${lv}`;
+    el.innerHTML = `<b>${esc(title || LEVEL_LABEL[lv] || 'Info')}</b>${esc(text)}`;
+    const box = $('#toasts');
+    box.prepend(el);
+    while (box.children.length > 3) box.lastChild.remove();
+    setTimeout(() => el.remove(), 6000);
+  }
+
+  // ---- Actions -----------------------------------------------------------
+  function requestDelivery(a) {
+    const s = S[a.holder];
+    if (s.internal || s.closed || a.request) return;
+    a.request = 'pending';
+    a.requestAt = tickN;
+    log(`Delivery request sent to ${s.name} for ${a.id} ${a.name}, as the contract requires.`);
+    renderAll();
+  }
+  function startCopy(a, fast) {
+    if (JOBS.find((j) => j.asset === a.id) || a.cityCopies >= 3) return;
+    const label = ['first copy', 'second copy', 'third copy'][a.cityCopies];
+    JOBS.push({ asset: a.id, label, size: rnd(0.4, 8), pct: 0, speed: fast ? 9 : rnd(3, 6) });
+    log(`Sovereign copy of ${a.id} ${a.name} started (${label}).`);
+    renderAll();
+  }
+  function startInterview(a, fast) {
+    if (KNOW.find((x) => x.asset === a.id && !x.finished) || a.knowers >= 3) return;
+    KNOW.unshift({ id: `k${Date.now()}`, role: `${TYPE[a.type]} expert`, asset: a.id, leaves: 'Scheduled today', done: 0, total: 4, speed: fast ? 0.35 : 0.08, finished: false });
+    log(`Knowledge interview scheduled for ${a.id} ${a.name}.`);
+    renderAll();
+  }
+
+  // ---- Live engine -------------------------------------------------------
+  function runProof(a, forceOk) {
+    const s = S[a.holder];
+    let res;
+    if (s.closed) res = a.cityCopies > 0 ? 'OK' : 'FAIL';
+    else if (forceOk) res = 'OK';
+    else {
+      const failP = s.internal ? 0.002 : (1 - s.health / 100) * 0.07;
+      const r = Math.random();
+      res = r < failP ? 'FAIL' : r < failP * 2.5 ? 'LATE' : 'OK';
+    }
+    a.lastProof = now();
+    a.proof = s.closed ? 'city' : res === 'FAIL' ? 'fail' : 'ok';
+    FEED.unshift({ t: a.lastProof, id: a.id, who: s.closed ? 'City vault' : s.name, block: nf(Math.floor(rnd(1000, 90000))), nonce: hex(6), ms: Math.round(rnd(90, res === 'LATE' ? 2400 : 420)), res });
+    FEED.length = Math.min(FEED.length, 16);
+    if (res === 'FAIL') {
+      proofs.failed++;
+      toast(`${a.id} ${a.name}: ${s.name} could not prove it still holds the data.`, 'high', 'Proof failed');
+      log(`Proof of possession failed for ${a.id}. Re-check scheduled.`, 'Strażnik');
+    }
+    ping(a.id);
+  }
+
+  function tick() {
+    tickN++;
+    $('#clock').textContent = now();
+
+    // proof checks: one visible on the map, many in the background
+    const candidates = ASSETS.filter((a) => !(scen && a.id === 'A-0412' && scen.t < 10));
+    runProof(pick(candidates));
+    proofs.passed += Math.floor(rnd(4, 12));
+
+    // supplier health drifts back toward its baseline
+    SUPPLIERS.forEach((s) => {
+      if (!s.lock && !s.closed) s.health = clamp(s.health + rnd(-1.6, 1.6) + (s.base - s.health) * 0.04, 3, 99);
+      s.hist.push(s.closed ? 0 : s.health);
+      s.hist.shift();
+    });
+    // a new warning sign now and then
+    if (tickN % 23 === 0) {
+      const s = pick(SUPPLIERS.filter((x) => !x.internal && !x.closed && !x.lock));
+      const sig = pick(['Late payment', 'Key staff left', 'Negative press', 'Server outage', 'Lost a big client']);
+      s.health = clamp(s.health - rnd(6, 12), 5, 99);
+      s.base = clamp(s.base - 3, 30, 99);
+      s.signals.push(sig);
+      toast(`${s.name}: ${sig.toLowerCase()}.`, 'medium', 'Warning sign');
+    }
+    // contracts count down (one simulated day every 8 ticks)
+    if (tickN % 8 === 0) ASSETS.forEach((a) => { if (a.contract != null && a.contract > 0 && !S[a.holder].closed) a.contract--; });
+
+    // vault copies
+    JOBS.forEach((j) => { j.pct = Math.min(100, j.pct + j.speed * rnd(0.6, 1.4)); });
+    JOBS.filter((j) => j.pct >= 100).forEach((j) => {
+      const a = A[j.asset];
+      a.cityCopies = Math.min(3, a.cityCopies + 1);
+      log(`Sovereign copy of ${a.id} ${a.name} complete. City copies: ${a.cityCopies}.`, 'Strażnik');
+      toast(`${a.id} ${a.name} now has ${a.cityCopies} city cop${a.cityCopies === 1 ? 'y' : 'ies'}.`, 'low', 'Copy complete');
+    });
+    JOBS = JOBS.filter((j) => j.pct < 100);
+    // routine: schedule a copy for the riskiest zero-copy asset
+    if (tickN % 31 === 0 && JOBS.length < 3) {
+      const target = ASSETS.filter((a) => a.cityCopies === 0 && !JOBS.find((j) => j.asset === a.id) && !(scen && a.id === 'A-0412'))
+        .sort((x, y) => risk(y).score - risk(x).score)[0];
+      if (target) startCopy(target, false);
+    }
+
+    // delivery requests answered by suppliers
+    ASSETS.forEach((a) => {
+      if (a.request === 'pending' && tickN - a.requestAt > 7) {
+        a.request = 'done';
+        a.cityCopies = Math.min(3, a.cityCopies + 1);
+        log(`${S[a.holder].name} delivered ${a.id} ${a.name} to the city.`, 'Strażnik');
+        toast(`${S[a.holder].name} delivered ${a.id}.`, 'low', 'Delivery received');
+      }
+    });
+
+    // knowledge interviews
+    KNOW.forEach((k) => {
+      if (k.finished) return;
+      k.done = Math.min(k.total, k.done + k.speed * rnd(0.5, 1.5));
+      if (k.done >= k.total) {
+        k.finished = true;
+        const a = A[k.asset];
+        a.knowers++;
+        log(`Know-how for ${a.id} ${a.name} written down. People who know it: ${a.knowers}.`, 'Strażnik');
+        toast(`Know-how for ${a.id} is now documented.`, 'low', 'Interview done');
+      }
+    });
+
+    if (scen) scenarioTick();
+    if (tickN % 5 === 0) $('#mlTime').textContent = `Updated ${now()}`;
+    renderAll();
+  }
+
+  function renderAll() {
+    renderKPIs(); renderMap(); renderList(); renderCard(); renderVault(); renderSuppliers(); renderKnow(); renderFeed(); renderLog();
+  }
+
+  // ---- Demo scenario -----------------------------------------------------
+  const STEPS = ['Warning signs', 'Morning list #1', 'Zero city copies', 'Actions approved', 'Supplier closes'];
+  function setStep(i, msg) {
+    scen.step = i;
+    $('#steps').innerHTML = STEPS.map((s, k) => `<div class="step ${k <= i ? 'on' : ''}"><b></b><span>${k + 1}. ${s}</span></div>`).join('');
+    $('#scenarioMsg').textContent = msg;
+  }
+  function startScenario() {
+    if (scen) return;
+    scen = { t: 0, step: 0, closingAt: null, done: false };
+    S.viatrix.lock = true;
+    $('#scenario').hidden = false;
+    $('#demoBtn').disabled = true;
+    if (query !== 'all') setQuery('all');
+    select('A-0412');
+    setStep(0, 'Viatrix Systems runs the traffic lights. Strażnik is reading its signals…');
+  }
+  function scenarioTick() {
+    const v = S.viatrix, a = A['A-0412'];
+    scen.t++;
+    if (scen.done) return;
+    if (scen.t <= 6) {
+      v.health = Math.max(9, v.health - 11);
+      if (scen.t === 1) {
+        v.signals.push('3 late payments', '18 engineers left', 'Court filing');
+        toast('Viatrix Systems: 3 late payments, 18 engineers left, court filing.', 'high', 'Warning signs');
+        setStep(0, 'Warning signs: late payments, engineers leaving, a court filing. The supplier’s health drops fast.');
+      }
+    }
+    if (scen.t === 7) {
+      setStep(1, 'A-0412 Traffic light control code jumps to #1 on the morning list. About 8 months before any closure.');
+      toast('A-0412 Traffic light control code is now #1 on the morning list.', 'critical', 'New critical');
+      log('A-0412 moved to #1 on the morning list.', 'Strażnik');
+    }
+    if (scen.t === 10) {
+      runProof(a, true);
+      setStep(2, 'Proof passed: Viatrix still has the code. But the city holds zero copies, and only one person knows the setup. Red alert.');
+      toast('The city holds zero copies of A-0412.', 'critical', 'Red alert');
+    }
+    if (scen.t === 14) {
+      setStep(3, 'Strażnik proposes three actions. The duty officer approves: request the code, make a sovereign copy, record the technician’s know-how.');
+      requestDelivery(a);
+      startCopy(a, true);
+      const k = KNOW.find((x) => x.asset === 'A-0412' && !x.finished);
+      if (k) { k.speed = 0.75; k.leaves = 'Interview moved up: supplier in trouble'; log('Knowledge interview for A-0412 moved up.'); }
+      else startInterview(a, true);
+    }
+    if (scen.step === 3 && !scen.closingAt && a.cityCopies > 0 && a.knowers >= 2) scen.closingAt = scen.t + 4;
+    if (scen.closingAt && scen.t === scen.closingAt) {
+      v.closed = true;
+      v.health = 0;
+      v.signals.push('Company closed');
+      setStep(4, 'Viatrix Systems has closed. The city holds its own copy of the code and the know-how. The traffic lights keep working. Nothing is lost.');
+      toast('Viatrix Systems closed. The city lost nothing.', 'low', 'Day 0');
+      log('Viatrix Systems closed. A-0412 is safe: the city holds its own copy.', 'Strażnik');
+      scen.done = true;
+    }
+  }
+
+  // ---- Controls ------------------------------------------------------------
+  let timer = null;
+  function setRunning(on) {
+    clearInterval(timer);
+    timer = on ? setInterval(tick, 1100) : null;
+    $('#pauseBtn').textContent = on ? 'Pause live' : 'Resume live';
+    $('#live').classList.toggle('paused', !on);
+  }
+  function setQuery(q) {
+    query = q;
+    document.querySelectorAll('.q').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.q === q)));
+    renderMap();
+  }
+  document.querySelectorAll('.q').forEach((b) => b.addEventListener('click', () => setQuery(b.dataset.q)));
+  $('#pauseBtn').addEventListener('click', () => setRunning(!timer));
+  $('#demoBtn').addEventListener('click', () => { startScenario(); if (!timer) setRunning(true); });
+  $('#resetBtn').addEventListener('click', () => {
+    init();
+    $('#scenario').hidden = true;
+    $('#demoBtn').disabled = false;
+    $('#toasts').innerHTML = '';
+    buildMap(); setQuery('all'); buildCard(); renderAll();
+  });
+
+  init();
+  // warm the feed so the first frame looks live
+  for (let i = 0; i < 9; i++) runProof(pick(ASSETS), true);
+  buildMap();
+  buildCard();
+  $('#clock').textContent = now();
+  $('#mlTime').textContent = `Updated ${now()}`;
+  renderAll();
+  setRunning(true);
+})();
+</script>
+</body>
+</html>
